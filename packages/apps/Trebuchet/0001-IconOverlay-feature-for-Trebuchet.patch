@@ -1,0 +1,1044 @@
+From 1d6b8eeff007d75f83836a99a8af92b70e16cb40 Mon Sep 17 00:00:00 2001
+From: "nick.guo" <nick.guo.dev@icloud.com>
+Date: Fri, 12 Aug 2016 10:09:47 +0800
+Subject: [PATCH] IconOverlay feature for Trebuchet
+
+Change-Id: I867c8fb4ee410731ad55fe2b2fa6d042f8b6cf2b
+---
+ Android.mk                                         |   3 +-
+ AndroidManifest.xml                                |  15 +
+ res/layout/apps_list_item.xml                      |  24 +
+ res/layout/layout_recycler.xml                     |  25 +
+ res/menu/icon_overlay_item_actions.xml             |  30 ++
+ res/values-zh-rCN/cm_strings.xml                   |   3 +
+ res/values/cm_strings.xml                          |   3 +
+ res/values/config.xml                              |   2 +
+ res/values/strings.xml                             |   1 -
+ res/values/styles.xml                              |   6 +
+ res/xml/file_paths.xml                             |  20 +
+ src/com/android/launcher3/IconCache.java           |  56 ++-
+ src/com/android/launcher3/IconOverlayActivity.java | 512 +++++++++++++++++++++
+ src/com/android/launcher3/Launcher.java            |  16 +
+ src/com/android/launcher3/LauncherApplication.java |   4 +
+ .../android/launcher3/OverviewSettingsPanel.java   |  14 +-
+ .../list/SettingsPinnedHeaderAdapter.java          |  23 +-
+ 17 files changed, 740 insertions(+), 17 deletions(-)
+ create mode 100644 res/layout/apps_list_item.xml
+ create mode 100755 res/layout/layout_recycler.xml
+ create mode 100755 res/menu/icon_overlay_item_actions.xml
+ create mode 100644 res/xml/file_paths.xml
+ create mode 100644 src/com/android/launcher3/IconOverlayActivity.java
+
+diff --git a/Android.mk b/Android.mk
+index 38edafa..d400dee 100644
+--- a/Android.mk
++++ b/Android.mk
+@@ -26,7 +26,8 @@ LOCAL_MODULE_TAGS := optional
+ LOCAL_STATIC_JAVA_LIBRARIES := \
+     android-support-v4 \
+     android-support-v7-recyclerview \
+-    org.cyanogenmod.platform.internal
++    org.cyanogenmod.platform.internal \
++    android.opt.imageloader
+ 
+ LOCAL_STATIC_JAVA_AAR_LIBRARIES := ambientsdk
+ 
+diff --git a/AndroidManifest.xml b/AndroidManifest.xml
+index 09ed01d..6925a00 100644
+--- a/AndroidManifest.xml
++++ b/AndroidManifest.xml
+@@ -151,6 +151,10 @@
+             </intent-filter>
+         </activity>
+ 
++        <activity android:name=".IconOverlayActivity"
++                  android:theme="@style/IconOverlayPickr"
++                  android:label="@string/action_icon_overlay"/>
++
+         <activity
+             android:name="com.android.launcher3.WallpaperCropActivity"
+             android:theme="@style/Theme.WallpaperCropper"
+@@ -243,5 +247,16 @@
+ 
+         <meta-data android:name="com.cyanogen.ambient.analytics.key"
+                    android:value="DScKo29EpMBx1833F7ln1811KFPf14UT"/>
++                   
++        <provider
++            android:name="android.support.v4.content.FileProvider"
++            android:authorities="com.android.launcher3.files"
++            android:grantUriPermissions="true"
++            android:exported="false">
++            <meta-data
++                android:name="android.support.FILE_PROVIDER_PATHS"
++                android:resource="@xml/file_paths" />
++        </provider>
++
+     </application>
+ </manifest>
+diff --git a/res/layout/apps_list_item.xml b/res/layout/apps_list_item.xml
+new file mode 100644
+index 0000000..0fcc8b9
+--- /dev/null
++++ b/res/layout/apps_list_item.xml
+@@ -0,0 +1,24 @@
++<?xml version="1.0" encoding="utf-8"?>
++<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
++    android:layout_width="match_parent"
++    android:layout_height="match_parent">
++
++    <ImageView
++        android:layout_width="60dp"
++        android:layout_height="60dp"
++        android:layout_centerVertical="true"
++        android:layout_alignParentStart="true"
++        android:layout_margin="8dp"
++        android:id="@+id/icon"
++        android:layout_alignParentLeft="true" />
++
++    <TextView
++        android:layout_width="wrap_content"
++        android:layout_height="wrap_content"
++        android:layout_toEndOf="@+id/icon"
++        android:layout_centerVertical="true"
++        android:padding="6dp"
++        android:id="@+id/title"
++        android:layout_toRightOf="@+id/icon" />
++
++</RelativeLayout>
+\ No newline at end of file
+diff --git a/res/layout/layout_recycler.xml b/res/layout/layout_recycler.xml
+new file mode 100755
+index 0000000..40b9882
+--- /dev/null
++++ b/res/layout/layout_recycler.xml
+@@ -0,0 +1,25 @@
++<!--
++  ~ Copyright (c) 2016 Nick Guo
++  ~
++  ~ Licensed under the Apache License, Version 2.0 (the "License");
++  ~ you may not use this file except in compliance with the License.
++  ~ You may obtain a copy of the License at
++  ~
++  ~ http://www.apache.org/licenses/LICENSE-2.0
++  ~
++  ~ Unless required by applicable law or agreed to in writing, software
++  ~ distributed under the License is distributed on an "AS IS" BASIS,
++  ~ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++  ~ See the License for the specific language governing permissions and
++  ~ limitations under the License.
++  -->
++
++<ListView xmlns:android="http://schemas.android.com/apk/res/android"
++    android:id="@+id/list"
++    android:layout_width="match_parent"
++    android:layout_height="match_parent"
++    android:layout_marginStart="16dp"
++    android:layout_marginEnd="16dp"
++    android:layout_marginLeft="16dp"
++    android:layout_marginRight="16dp"/>
++
+diff --git a/res/menu/icon_overlay_item_actions.xml b/res/menu/icon_overlay_item_actions.xml
+new file mode 100755
+index 0000000..f91d080
+--- /dev/null
++++ b/res/menu/icon_overlay_item_actions.xml
+@@ -0,0 +1,30 @@
++<!--
++  ~ Copyright (c) 2016 Nick Guo
++  ~
++  ~ Licensed under the Apache License, Version 2.0 (the "License");
++  ~ you may not use this file except in compliance with the License.
++  ~ You may obtain a copy of the License at
++  ~
++  ~ http://www.apache.org/licenses/LICENSE-2.0
++  ~
++  ~ Unless required by applicable law or agreed to in writing, software
++  ~ distributed under the License is distributed on an "AS IS" BASIS,
++  ~ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++  ~ See the License for the specific language governing permissions and
++  ~ limitations under the License.
++  -->
++
++<menu xmlns:android="http://schemas.android.com/apk/res/android"
++    xmlns:tools="http://schemas.android.com/tools"
++    tools:context="nick.dev.sina.app.content.ScrollingActivity">
++    <item
++        android:id="@+id/action_take"
++        android:orderInCategory="100"
++        android:title="@string/action_take"
++        android:showAsAction="never" />
++    <item
++        android:id="@+id/action_pick"
++        android:orderInCategory="100"
++        android:title="@string/action_pick"
++        android:showAsAction="never" />
++</menu>
+diff --git a/res/values-zh-rCN/cm_strings.xml b/res/values-zh-rCN/cm_strings.xml
+index e761072..0de008d 100644
+--- a/res/values-zh-rCN/cm_strings.xml
++++ b/res/values-zh-rCN/cm_strings.xml
+@@ -67,4 +67,7 @@
+   <string name="storage_permission_denied">无法访问存储</string>
+   <string name="export_db_email_subject">启动器的区域数据库</string>
+   <string name="export_db_could_not">无法导出数据库文件</string>
++  <string name="action_icon_overlay">图标替换</string>
++  <string name="action_pick">图库</string>
++  <string name="action_take">拍照</string>
+ </resources>
+diff --git a/res/values/cm_strings.xml b/res/values/cm_strings.xml
+index 193fa84..c891499 100644
+--- a/res/values/cm_strings.xml
++++ b/res/values/cm_strings.xml
+@@ -84,4 +84,7 @@
+     <string name="storage_permission_denied">Can\'t access storage</string>
+     <string name="export_db_email_subject">Launcher DB for region</string>
+     <string name="export_db_could_not">Could not export DB file</string>
++    <string name="action_icon_overlay">Icon overlay</string>
++    <string name="action_pick">Pick from Gallery</string>
++    <string name="action_take">Take from Camera</string>
+ </resources>
+diff --git a/res/values/config.xml b/res/values/config.xml
+index 4d3f011..4c11b3c 100644
+--- a/res/values/config.xml
++++ b/res/values/config.xml
+@@ -90,4 +90,6 @@
+     <item type="id" name="action_move_screen_backwards" />
+     <item type="id" name="action_move_screen_forwards" />
+     <item type="id" name="action_resize" />
++
++    <string name="photo_file_provider_authority" translatable="false">com.android.launcher3.files</string>
+ </resources>
+diff --git a/res/values/strings.xml b/res/values/strings.xml
+index b544788..7107f44 100644
+--- a/res/values/strings.xml
++++ b/res/values/strings.xml
+@@ -263,5 +263,4 @@
+ 
+     <!-- Accessibility confirmation for widget resize. -->
+     <string name="widget_resized">Widget resized to width <xliff:g id="number" example="2">%1$s</xliff:g> height <xliff:g id="number" example="1">%2$s</xliff:g></string>
+-
+ </resources>
+diff --git a/res/values/styles.xml b/res/values/styles.xml
+index 9104bc9..4d6ed96 100644
+--- a/res/values/styles.xml
++++ b/res/values/styles.xml
+@@ -93,4 +93,10 @@
+         <item name="ringOutset">4dp</item>
+     </style>
+ 
++    <style name="IconOverlayPickr" parent="android:Theme.DeviceDefault">
++        <item name="android:colorPrimary">@color/settings_bg_color</item>
++        <item name="android:colorPrimaryDark">@color/settings_bg_color</item>
++        <item name="android:windowBackground">@color/settings_bg_color</item>
++    </style>
++
+ </resources>
+diff --git a/res/xml/file_paths.xml b/res/xml/file_paths.xml
+new file mode 100644
+index 0000000..294c0cb
+--- /dev/null
++++ b/res/xml/file_paths.xml
+@@ -0,0 +1,20 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- Copyright (C) 2013 The Android Open Source Project
++
++     Licensed under the Apache License, Version 2.0 (the "License");
++     you may not use this file except in compliance with the License.
++     You may obtain a copy of the License at
++
++          http://www.apache.org/licenses/LICENSE-2.0
++
++     Unless required by applicable law or agreed to in writing, software
++     distributed under the License is distributed on an "AS IS" BASIS,
++     WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++     See the License for the specific language governing permissions and
++     limitations under the License.
++-->
++
++<paths xmlns:android="http://schemas.android.com/apk/res/android">
++    <!-- Offer access to files under Context.getCacheDir() -->
++    <cache-path name="my_cache" />
++</paths>
+diff --git a/src/com/android/launcher3/IconCache.java b/src/com/android/launcher3/IconCache.java
+index ca5545d..6f65fc9 100644
+--- a/src/com/android/launcher3/IconCache.java
++++ b/src/com/android/launcher3/IconCache.java
+@@ -50,6 +50,7 @@ import com.android.launcher3.model.PackageItemInfo;
+ import com.android.launcher3.util.ComponentKey;
+ import com.android.launcher3.util.Thunk;
+ 
++import java.io.File;
+ import java.util.Collections;
+ import java.util.HashMap;
+ import java.util.HashSet;
+@@ -60,6 +61,9 @@ import java.util.Map;
+ import java.util.Set;
+ import java.util.Stack;
+ 
++import dev.nick.imageloader.logger.Logger;
++import dev.nick.imageloader.logger.LoggerManager;
++
+ /**
+  * Cache of application icons.  Icons can be made from any thread.
+  */
+@@ -72,7 +76,7 @@ public class IconCache {
+     // Empty class name is used for storing package default entry.
+     private static final String EMPTY_CLASS_NAME = ".";
+ 
+-    private static final boolean DEBUG = false;
++    private static final boolean DEBUG = true;
+ 
+     private static final int LOW_RES_SCALE_FACTOR = 5;
+ 
+@@ -83,6 +87,16 @@ public class IconCache {
+         public CharSequence title = "";
+         public CharSequence contentDescription = "";
+         public boolean isLowResIcon;
++
++        @Override
++        public String toString() {
++            return "CacheEntry{" +
++                    "icon=" + icon +
++                    ", title=" + title +
++                    ", contentDescription=" + contentDescription +
++                    ", isLowResIcon=" + isLowResIcon +
++                    '}';
++        }
+     }
+ 
+     private final HashMap<UserHandleCompat, Bitmap> mDefaultIcons = new HashMap<>();
+@@ -113,6 +127,8 @@ public class IconCache {
+     private Canvas mLowResCanvas;
+     private Paint mLowResPaint;
+ 
++    Logger mLogger;
++
+     public IconCache(Context context, InvariantDeviceProfile inv) {
+         mContext = context;
+         mPackageManager = context.getPackageManager();
+@@ -574,15 +590,24 @@ public class IconCache {
+             // Check the DB first.
+             if (!getEntryFromDB(cacheKey, entry, useLowResIcon)) {
+                 if (info != null) {
+-                    entry.icon = Utilities.createIconBitmap(info.getBadgedIcon(mIconDpi), mContext);
++                    entry.icon = getFromThemeEngine(componentName.getPackageName());
++                    if (entry.icon == null) {
++                        entry.icon = Utilities.createIconBitmap(info.getBadgedIcon(mIconDpi), mContext);
++                    }
+                 } else {
+                     if (usePackageIcon) {
+                         CacheEntry packageEntry = getEntryForPackageLocked(
+                                 componentName.getPackageName(), user, false);
+                         if (packageEntry != null) {
+-                            if (DEBUG) Log.d(TAG, "using package default icon for " +
+-                                    componentName.toShortString());
+-                            entry.icon = packageEntry.icon;
++                            entry.icon = getFromThemeEngine(componentName.getPackageName());
++                            if (entry.icon == null) {
++                                if (DEBUG) Log.d(TAG, "using package default icon for " +
++                                        componentName.toShortString());
++                                entry.icon = packageEntry.icon;
++                            } else {
++                                if (DEBUG) Log.d(TAG, "using prebuilt themed icon for " +
++                                        componentName.toShortString());
++                            }
+                             entry.title = packageEntry.title;
+                             entry.contentDescription = packageEntry.contentDescription;
+                         }
+@@ -603,6 +628,19 @@ public class IconCache {
+         return entry;
+     }
+ 
++    Bitmap getFromThemeEngine(String pkg) {
++        String path = pathOfThemed(mContext, pkg);
++        if (new File(path).exists()) {
++            return BitmapFactory.decodeFile(path);
++        }
++        return null;
++    }
++
++    public static String pathOfThemed(Context context, String pkg) {
++        File cacheDir = context.getExternalCacheDir();
++        return cacheDir + File.separator + "icon_overlay" + File.separator + pkg;
++    }
++
+     /**
+      * Adds a default package entry in the cache. This entry is not persisted and will be removed
+      * when the cache is flushed.
+@@ -715,6 +753,7 @@ public class IconCache {
+     }
+ 
+     private boolean getEntryFromDB(ComponentKey cacheKey, CacheEntry entry, boolean lowRes) {
++        if (DEBUG) Log.d(TAG, "getEntryFromDB:" + cacheKey);
+         Cursor c = mIconDb.getReadableDatabase().query(IconDB.TABLE_NAME,
+                 new String[] {lowRes ? IconDB.COLUMN_ICON_LOW_RES : IconDB.COLUMN_ICON,
+                         IconDB.COLUMN_LABEL},
+@@ -724,7 +763,12 @@ public class IconCache {
+                 null, null, null);
+         try {
+             if (c.moveToNext()) {
+-                entry.icon = loadIconNoResize(c, 0, lowRes ? mLowResOptions : null);
++                entry.icon = getFromThemeEngine(cacheKey.componentName.getPackageName());
++                if (entry.icon == null) {
++                    if (DEBUG) Log.d(TAG, "Prebuilt themed icon not found for:" + cacheKey);
++                    entry.icon = loadIconNoResize(c, 0, lowRes ? mLowResOptions : null);
++                }
++
+                 entry.isLowResIcon = lowRes;
+                 entry.title = c.getString(1);
+                 if (entry.title == null) {
+diff --git a/src/com/android/launcher3/IconOverlayActivity.java b/src/com/android/launcher3/IconOverlayActivity.java
+new file mode 100644
+index 0000000..d9952a7
+--- /dev/null
++++ b/src/com/android/launcher3/IconOverlayActivity.java
+@@ -0,0 +1,512 @@
++package com.android.launcher3;
++
++import android.annotation.TargetApi;
++import android.app.Activity;
++import android.content.ClipData;
++import android.content.Context;
++import android.content.Intent;
++import android.content.pm.PackageManager;
++import android.content.pm.ResolveInfo;
++import android.graphics.Bitmap;
++import android.graphics.BitmapFactory;
++import android.net.Uri;
++import android.os.Build;
++import android.os.Bundle;
++import android.provider.MediaStore;
++import android.support.v4.content.FileProvider;
++import android.util.Log;
++import android.view.LayoutInflater;
++import android.view.MenuItem;
++import android.view.View;
++import android.view.ViewGroup;
++import android.widget.AdapterView;
++import android.widget.BaseAdapter;
++import android.widget.ImageView;
++import android.widget.ListView;
++import android.widget.PopupMenu;
++import android.widget.TextView;
++import android.widget.Toast;
++
++import java.io.ByteArrayOutputStream;
++import java.io.File;
++import java.io.FileNotFoundException;
++import java.io.FileOutputStream;
++import java.io.IOException;
++import java.io.InputStream;
++import java.text.SimpleDateFormat;
++import java.util.Date;
++import java.util.List;
++import java.util.Locale;
++
++public class IconOverlayActivity extends Activity {
++
++    private static final String TAG = "IconOverlayActivity";
++
++    private static final int REQUEST_CODE_CAMERA_WITH_DATA = 1001;
++    private static final int REQUEST_CODE_PHOTO_PICKED_WITH_DATA = 1002;
++    private static final int REQUEST_CROP_PHOTO = 1003;
++    private static final int REQUEST_CODE_STORAGE_PERMISSION = 1004;
++
++    private static final String PHOTO_DATE_FORMAT = "'IMG'_yyyyMMdd_HHmmss";
++    public static final String CHANGED_ACTION = "android.intent.action.ICON_OVERLAY_CHANGED";
++
++    private Uri mCroppedPhotoUri;
++    private Uri mTempPhotoUri;
++    private Uri mCurrentPhotoUri;
++
++    AppInfo mInfo;
++
++    AllAppsList mAllAppList;
++
++    BaseAdapter mAdapter;
++
++    @Override
++    protected void onCreate(Bundle savedInstanceState) {
++        super.onCreate(savedInstanceState);
++        setContentView(R.layout.layout_recycler);
++
++        getActionBar().setDisplayHomeAsUpEnabled(true);
++
++        mAllAppList = LauncherAppState.getInstanceNoCreate().getModel().mBgAllAppsList;
++
++        ListView listView = (ListView) findViewById(R.id.list);
++        mAdapter = new BaseAdapter() {
++            @Override
++            public int getCount() {
++                return mAllAppList.data.size();
++            }
++
++            @Override
++            public Object getItem(int i) {
++                return mAllAppList.data.get(i);
++            }
++
++            @Override
++            public long getItemId(int i) {
++                return i;
++            }
++
++            @Override
++            public View getView(int i, View view, ViewGroup viewGroup) {
++                Holder holder;
++                if (view == null) {
++                    view = LayoutInflater.from(getApplicationContext()).inflate(R.layout.apps_list_item, viewGroup, false);
++                    holder = new Holder(view);
++                    view.setTag(holder);
++                } else {
++                    holder = (Holder) view.getTag();
++                }
++                bindView(i, holder);
++                return view;
++            }
++
++            void bindView(int position, Holder holder) {
++                AppInfo info = mAllAppList.data.get(position);
++                holder.imageView.setImageBitmap(info.iconBitmap);
++                holder.textView.setText(info.title);
++            }
++        };
++        listView.setAdapter(mAdapter);
++
++        listView.setOnItemClickListener(new AdapterView.OnItemClickListener() {
++            @Override
++            public void onItemClick(AdapterView<?> adapterView, View view, int i, long l) {
++                PopupMenu popupMenu = new PopupMenu(getApplicationContext(), view);
++                popupMenu.inflate(R.menu.icon_overlay_item_actions);
++                popupMenu.setOnMenuItemClickListener(new PopMenuListener((AppInfo) adapterView.getAdapter().getItem(i)));
++                popupMenu.show();
++            }
++        });
++    }
++
++    @Override
++    public boolean onOptionsItemSelected(MenuItem item) {
++        if (item.getItemId() == android.R.id.home) finish();
++        return super.onOptionsItemSelected(item);
++    }
++
++    @Override
++    protected void onStart() {
++        super.onStart();
++        mTempPhotoUri = generateTempImageUri(this);
++        mCroppedPhotoUri = generateTempCroppedImageUri(this);
++    }
++
++    @Override
++    protected void onDestroy() {
++        super.onDestroy();
++        sendBroadcast(new Intent(CHANGED_ACTION));
++    }
++
++    /**
++     * Should initiate an activity to take a photo using the camera.
++     *
++     * @param photoUri The file path that will be used to store the photo.  This is generally
++     *                 what should be returned by.
++     */
++    private void startTakePhotoActivity(Uri photoUri) {
++        final Intent intent = getTakePhotoIntent(photoUri);
++        startPhotoActivity(intent, REQUEST_CODE_CAMERA_WITH_DATA, photoUri);
++    }
++
++    /**
++     * Should initiate an activity pick a photo from the gallery.
++     *
++     * @param photoUri The temporary file that the cropped image is written to before being
++     *                 stored by the content-provider.
++     */
++    private void startPickFromGalleryActivity(Uri photoUri) {
++        final Intent intent = getPhotoPickIntent(photoUri);
++        startPhotoActivity(intent, REQUEST_CODE_PHOTO_PICKED_WITH_DATA, photoUri);
++    }
++
++    /**
++     * Constructs an intent for picking a photo from Gallery, and returning the bitmap.
++     */
++    private Intent getPhotoPickIntent(Uri outputUri) {
++        final Intent intent = new Intent(Intent.ACTION_GET_CONTENT, null);
++        intent.setType("image/*");
++        addPhotoPickerExtras(intent, outputUri);
++        return intent;
++    }
++
++
++    /**
++     * Constructs an intent for capturing a photo and storing it in a temporary output uri.
++     */
++    private Intent getTakePhotoIntent(Uri outputUri) {
++        final Intent intent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE, null);
++        addPhotoPickerExtras(intent, outputUri);
++        return intent;
++    }
++
++    void startPhotoActivity(Intent intent, int code, Uri uri) {
++        mCurrentPhotoUri = uri;
++        startActivityForResult(intent, code);
++    }
++
++    /**
++     * Adds common extras to gallery intents.
++     *
++     * @param intent   The intent to add extras to.
++     * @param photoUri The uri of the file to save the image to.
++     */
++    @TargetApi(Build.VERSION_CODES.JELLY_BEAN)
++    public void addPhotoPickerExtras(Intent intent, Uri photoUri) {
++        intent.putExtra(MediaStore.EXTRA_OUTPUT, photoUri);
++        intent.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION |
++                Intent.FLAG_GRANT_READ_URI_PERMISSION);
++        intent.setClipData(ClipData.newRawUri(MediaStore.EXTRA_OUTPUT, photoUri));
++    }
++
++    @Override
++    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
++        super.onActivityResult(requestCode, resultCode, data);
++        handlePhotoActivityResult(requestCode, resultCode, data);
++    }
++
++    /**
++     * Attempts to handle the given activity result.  Returns whether this handler was able to
++     * process the result successfully.
++     *
++     * @param requestCode The request code.
++     * @param resultCode  The result code.
++     * @param data        The intent that was returned.
++     * @return Whether the handler was able to process the result.
++     */
++    public boolean handlePhotoActivityResult(int requestCode, int resultCode, Intent data) {
++        if (resultCode == Activity.RESULT_OK) {
++            switch (requestCode) {
++                // Cropped photo was returned
++                case REQUEST_CROP_PHOTO: {
++                    final Uri uri;
++                    if (data != null && data.getData() != null) {
++                        uri = data.getData();
++                    } else {
++                        uri = mCroppedPhotoUri;
++                    }
++
++                    // delete the original temporary photo if it exists
++                    getContentResolver().delete(mTempPhotoUri, null, null);
++                    onPhotoSelected(uri);
++                    return true;
++                }
++
++
++                case REQUEST_CODE_PHOTO_PICKED_WITH_DATA:
++                    final Uri pickedUri;
++                    if (data != null && data.getData() != null) {
++                        pickedUri = data.getData();
++                    } else {
++                        pickedUri = getCurrentPhotoUri();
++                    }
++                    onPhotoSelected(pickedUri);
++                    break;
++                // Photo was successfully taken, now crop it.
++                case REQUEST_CODE_CAMERA_WITH_DATA:
++                    final Uri takenUri;
++                    boolean isWritable = false;
++                    if (data != null && data.getData() != null) {
++                        takenUri = data.getData();
++                    } else {
++                        takenUri = getCurrentPhotoUri();
++                        isWritable = true;
++                    }
++                    final Uri toCrop;
++                    if (isWritable) {
++                        // Since this uri belongs to our file provider, we know that it is writable
++                        // by us. This means that we don't have to save it into another temporary
++                        // location just to be able to crop it.
++                        toCrop = takenUri;
++                    } else {
++                        toCrop = mTempPhotoUri;
++                        try {
++                            if (!savePhotoFromUriToUri(this, takenUri,
++                                    toCrop, false)) {
++                                return false;
++                            }
++                        } catch (SecurityException e) {
++                            Log.d(TAG, "Did not have read-access to uri : " + takenUri);
++                            return false;
++                        }
++                    }
++
++                    doCropPhoto(toCrop, mCroppedPhotoUri);
++                    return true;
++            }
++        }
++        return false;
++    }
++
++    void onPhotoSelected(Uri uri) {
++        Log.d(TAG, "Uri:" + uri);
++        try {
++            mInfo.iconBitmap = getBitmapFromUri(this, uri);
++            mAdapter.notifyDataSetChanged();
++            new Thread(new Runnable() {
++                @Override
++                public void run() {
++                    performOverlay(getApplicationContext(), mInfo.iconBitmap, mInfo.componentName.getPackageName());
++                }
++            }).start();
++        } catch (FileNotFoundException e) {
++            Log.e(TAG, "Failed to get file from uri:" + Log.getStackTraceString(e));
++        }
++    }
++
++    Uri getCurrentPhotoUri() {
++        return mCurrentPhotoUri;
++    }
++
++    /**
++     * Sends a newly acquired photo to Gallery for cropping
++     */
++    private void doCropPhoto(Uri inputUri, Uri outputUri) {
++        final Intent intent = getCropImageIntent(inputUri, outputUri);
++        if (!hasIntentHandler(intent)) {
++            onPhotoSelected(inputUri);
++            return;
++        }
++        try {
++            // Launch gallery to crop the photo
++            startPhotoActivity(intent, REQUEST_CROP_PHOTO, inputUri);
++        } catch (Exception e) {
++            Log.e(TAG, "Cannot crop image", e);
++        }
++    }
++
++    private boolean hasIntentHandler(Intent intent) {
++        final List<ResolveInfo> resolveInfo = getPackageManager()
++                .queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY);
++        return resolveInfo != null && resolveInfo.size() > 0;
++    }
++
++    /**
++     * Constructs an intent for image cropping.
++     */
++    private Intent getCropImageIntent(Uri inputUri, Uri outputUri) {
++        Intent intent = new Intent("com.android.camera.action.CROP");
++        intent.setDataAndType(inputUri, "image/*");
++        addPhotoPickerExtras(intent, outputUri);
++        addCropExtras(intent, 240);// FIXME: 16-8-11 Real size.
++        return intent;
++    }
++
++    public static Uri generateTempImageUri(Context context) {
++        final String fileProviderAuthority = context.getResources().getString(
++                R.string.photo_file_provider_authority);
++        return FileProvider.getUriForFile(context, fileProviderAuthority,
++                new File(pathForTempPhoto(context, generateTempPhotoFileName())));
++    }
++
++    public static Uri generateTempCroppedImageUri(Context context) {
++        final String fileProviderAuthority = context.getResources().getString(
++                R.string.photo_file_provider_authority);
++        return FileProvider.getUriForFile(context, fileProviderAuthority,
++                new File(pathForTempPhoto(context, generateTempCroppedPhotoFileName())));
++    }
++
++    private static String pathForTempPhoto(Context context, String fileName) {
++        final File dir = context.getCacheDir();
++        dir.mkdirs();
++        final File f = new File(dir, fileName);
++        return f.getAbsolutePath();
++    }
++
++    private static String generateTempPhotoFileName() {
++        final Date date = new Date(System.currentTimeMillis());
++        SimpleDateFormat dateFormat = new SimpleDateFormat(PHOTO_DATE_FORMAT, Locale.US);
++        return "Themed_ic-" + dateFormat.format(date) + ".jpg";
++    }
++
++    private static String generateTempCroppedPhotoFileName() {
++        final Date date = new Date(System.currentTimeMillis());
++        SimpleDateFormat dateFormat = new SimpleDateFormat(PHOTO_DATE_FORMAT, Locale.US);
++        return "Themed_ic-" + dateFormat.format(date) + "-cropped.jpg";
++    }
++
++    public static void addCropExtras(Intent intent, int photoSize) {
++        intent.putExtra("crop", "true");
++        intent.putExtra("scale", true);
++        intent.putExtra("scaleUpIfNeeded", true);
++        intent.putExtra("aspectX", 1);
++        intent.putExtra("aspectY", 1);
++        intent.putExtra("outputX", photoSize);
++        intent.putExtra("outputY", photoSize);
++    }
++
++    /**
++     * Given a uri pointing to a bitmap, reads it into a bitmap and returns it.
++     *
++     * @throws FileNotFoundException
++     */
++    public static Bitmap getBitmapFromUri(Context context, Uri uri) throws FileNotFoundException {
++        final InputStream imageStream = context.getContentResolver().openInputStream(uri);
++        try {
++            return BitmapFactory.decodeStream(imageStream);
++        } finally {
++            if (imageStream != null) {
++                try {
++                    imageStream.close();
++                } catch (IOException e) {
++
++                }
++            }
++        }
++    }
++
++    /**
++     * Creates a byte[] containing the PNG-compressed bitmap, or null if
++     * something goes wrong.
++     */
++    public static byte[] compressBitmap(Bitmap bitmap) {
++        final int size = bitmap.getWidth() * bitmap.getHeight() * 4;
++        final ByteArrayOutputStream out = new ByteArrayOutputStream(size);
++        try {
++            bitmap.compress(Bitmap.CompressFormat.PNG, 100, out);
++            out.flush();
++            out.close();
++            return out.toByteArray();
++        } catch (IOException e) {
++            Log.w(TAG, "Unable to serialize photo: " + e.toString());
++            return null;
++        }
++    }
++
++    public static void performOverlay(Context context, Bitmap bitmap, String pkg) {
++        File out = new File(IconCache.pathOfThemed(context, pkg));
++        if (!out.getParentFile().exists() && !out.getParentFile().mkdirs()) {
++            Log.e(TAG, "Failed to mkdirs for:" + out.getParentFile().getPath());
++            return;
++        }
++        try {
++            FileOutputStream stream = new FileOutputStream(out);
++            bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream);
++        } catch (FileNotFoundException e) {
++            Log.e(TAG, "Failed to compress bitmap:" + Log.getStackTraceString(e));
++        }
++    }
++
++    /**
++     * Given an input photo stored in a uri, save it to a destination uri
++     */
++    public static boolean savePhotoFromUriToUri(Context context, Uri inputUri, Uri outputUri,
++                                                boolean deleteAfterSave) {
++        if (inputUri == null || outputUri == null) {
++            return false;
++        }
++        FileOutputStream outputStream = null;
++        InputStream inputStream = null;
++        try {
++            outputStream = context.getContentResolver()
++                    .openAssetFileDescriptor(outputUri, "rw").createOutputStream();
++            inputStream = context.getContentResolver().openInputStream(
++                    inputUri);
++
++            final byte[] buffer = new byte[16 * 1024];
++            int length;
++            int totalLength = 0;
++            while ((length = inputStream.read(buffer)) > 0) {
++                outputStream.write(buffer, 0, length);
++                totalLength += length;
++            }
++            Log.v(TAG, "Wrote " + totalLength + " bytes for photo " + inputUri.toString());
++        } catch (IOException | NullPointerException e) {
++            Log.e(TAG, "Failed to write photo: " + inputUri.toString() + " because: " + e);
++            return false;
++        } finally {
++            if (inputStream != null) try {
++                inputStream.close();
++            } catch (IOException e) {
++
++            }
++            if (outputStream != null) try {
++                outputStream.close();
++            } catch (IOException e) {
++
++            }
++            if (deleteAfterSave) {
++                context.getContentResolver().delete(inputUri, null, null);
++            }
++        }
++        return true;
++    }
++
++    class Holder {
++        ImageView imageView;
++        TextView textView;
++
++        View itemView;
++
++        Holder(View itemView) {
++            this.itemView = itemView;
++            this.imageView = (ImageView) itemView.findViewById(R.id.icon);
++            this.textView = (TextView) itemView.findViewById(R.id.title);
++        }
++    }
++
++    class PopMenuListener implements PopupMenu.OnMenuItemClickListener {
++
++        AppInfo info;
++
++        public PopMenuListener(AppInfo info) {
++            this.info = info;
++        }
++
++        @Override
++        public boolean onMenuItemClick(MenuItem menuItem) {
++            switch (menuItem.getItemId()) {
++                case R.id.action_take:
++                    mInfo = info;
++                    startTakePhotoActivity(mTempPhotoUri);
++                    break;
++                case R.id.action_pick:
++                    mInfo = info;
++                    startPickFromGalleryActivity(mTempPhotoUri);
++                    break;
++
++            }
++            return false;
++        }
++    }
++}
+\ No newline at end of file
+diff --git a/src/com/android/launcher3/Launcher.java b/src/com/android/launcher3/Launcher.java
+index f5c46d2..2877ac5 100644
+--- a/src/com/android/launcher3/Launcher.java
++++ b/src/com/android/launcher3/Launcher.java
+@@ -445,6 +445,18 @@ public class Launcher extends Activity
+         }
+     };
+ 
++    private BroadcastReceiver iconOverlayChangedReceiver = new BroadcastReceiver() {
++        @Override
++        public void onReceive(Context context, Intent intent) {
++            // Update the workspace
++            if (waitUntilResume(mReloadLauncherRunnable, true)) {
++                return;
++            }
++
++            reloadLauncher(mWorkspace.getRestorePage(), true, false);
++        }
++    };
++
+     // Preferences
+     private boolean mHideIconLabels;
+ 
+@@ -705,6 +717,10 @@ public class Launcher extends Activity
+         IntentFilter searchBarVisibilityFilter = new IntentFilter(
+                 SettingsPinnedHeaderAdapter.ACTION_SEARCH_BAR_VISIBILITY_CHANGED);
+         registerReceiver(searchBarVisibilityChangedReceiver, searchBarVisibilityFilter);
++
++        IntentFilter iconOverlayChangedFilter = new IntentFilter(
++                IconOverlayActivity.CHANGED_ACTION);
++        registerReceiver(iconOverlayChangedReceiver, iconOverlayChangedFilter);
+     }
+ 
+     public void checkPermissionsAndExportDBFile(){
+diff --git a/src/com/android/launcher3/LauncherApplication.java b/src/com/android/launcher3/LauncherApplication.java
+index 896963e..ffc562e 100644
+--- a/src/com/android/launcher3/LauncherApplication.java
++++ b/src/com/android/launcher3/LauncherApplication.java
+@@ -17,6 +17,7 @@
+ package com.android.launcher3;
+ 
+ import android.app.Application;
++import android.util.Log;
+ 
+ import com.android.launcher3.stats.LauncherStats;
+ import com.android.launcher3.stats.internal.service.AggregationIntentService;
+@@ -24,6 +25,9 @@ import com.cyanogen.ambient.analytics.AnalyticsServices;
+ import com.cyanogen.ambient.analytics.Event;
+ import com.cyanogen.ambient.common.api.AmbientApiClient;
+ 
++import dev.nick.imageloader.ImageLoader;
++import dev.nick.imageloader.logger.LoggerManager;
++
+ public class LauncherApplication extends Application {
+ 
+     private static LauncherStats sLauncherStats = null;
+diff --git a/src/com/android/launcher3/OverviewSettingsPanel.java b/src/com/android/launcher3/OverviewSettingsPanel.java
+index 4682779..5bfad52 100644
+--- a/src/com/android/launcher3/OverviewSettingsPanel.java
++++ b/src/com/android/launcher3/OverviewSettingsPanel.java
+@@ -40,15 +40,17 @@ public class OverviewSettingsPanel {
+ 
+         String[] valuesApp = null;
+ 
+-        if( mLauncher.getIsHiddenMenuOptionEnabled() == false ) {
++        if(!mLauncher.getIsHiddenMenuOptionEnabled()) {
+             valuesApp = new String[] {
+-                res.getString(R.string.larger_icons_text),
+-                res.getString(R.string.protected_app_settings)};
++                    res.getString(R.string.larger_icons_text),
++                    res.getString(R.string.protected_app_settings),
++                    res.getString(R.string.action_icon_overlay)};
+         } else {
+             valuesApp = new String[] {
+-                res.getString(R.string.larger_icons_text),
+-                res.getString(R.string.protected_app_settings),
+-                res.getString(R.string.export_workspace_layout)};
++                    res.getString(R.string.larger_icons_text),
++                    res.getString(R.string.protected_app_settings),
++                    res.getString(R.string.export_workspace_layout),
++                    res.getString(R.string.action_icon_overlay)};
+         }
+         mSettingsAdapter = new SettingsPinnedHeaderAdapter(mLauncher);
+         mSettingsAdapter.setHeaders(headers);
+diff --git a/src/com/android/launcher3/list/SettingsPinnedHeaderAdapter.java b/src/com/android/launcher3/list/SettingsPinnedHeaderAdapter.java
+index 4b51aac..ecee264 100644
+--- a/src/com/android/launcher3/list/SettingsPinnedHeaderAdapter.java
++++ b/src/com/android/launcher3/list/SettingsPinnedHeaderAdapter.java
+@@ -14,6 +14,8 @@ import android.view.ViewGroup;
+ import android.widget.Switch;
+ import android.widget.TextView;
+ import android.widget.Toast;
++
++import com.android.launcher3.IconOverlayActivity;
+ import com.android.launcher3.InvariantDeviceProfile;
+ import com.android.launcher3.Launcher;
+ import com.android.launcher3.LauncherSettings;
+@@ -199,8 +201,12 @@ public class SettingsPinnedHeaderAdapter extends PinnedHeaderListAdapter {
+                                 R.bool.preferences_interface_general_icons_large_default);
+                         setSettingSwitch(stateView, settingSwitch, current);
+                         break;
+-                    default:
++                    case 1:
+                         hideStates(stateView, settingSwitch);
++                        break;
++                    case 2:
++                        hideStates(stateView, settingSwitch);
++                        break;
+                 }
+         }
+ 
+@@ -374,8 +380,19 @@ public class SettingsPinnedHeaderAdapter extends PinnedHeaderListAdapter {
+                             mLauncher.startActivity(intent);
+                             break;
+                         case 2:
+-                            mLauncher.checkPermissionsAndExportDBFile();
+-                            mLauncher.emailExportedFile();
++                            if (!mLauncher.getIsHiddenMenuOptionEnabled()) {
++                                Intent overlayIntent = new Intent(mContext, IconOverlayActivity.class);
++                                overlayIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
++                                mContext.startActivity(overlayIntent);
++                            } else {
++                                mLauncher.checkPermissionsAndExportDBFile();
++                                mLauncher.emailExportedFile();
++                            }
++                            break;
++                        case 3:
++                            Intent overlayIntent = new Intent(mContext, IconOverlayActivity.class);
++                            overlayIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
++                            mContext.startActivity(overlayIntent);
+                             break;
+ 
+                     }
+-- 
+2.7.4
+
